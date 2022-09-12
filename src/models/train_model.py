@@ -31,10 +31,8 @@ def test(model, data):
     pred = out.argmax(dim=-1)
 
     acc = int((pred == data.y).sum()) / pred.size(0)
-    mask = data.y >= 7
-    acc_double_match = int((pred[mask] == data.y[mask]).sum()) / pred[mask].size(0)
 
-    return acc, acc_double_match
+    return acc
 
 
 def main():
@@ -43,8 +41,8 @@ def main():
     val_root = osp.join(osp.dirname(osp.realpath(__file__)), "..", "..", "data/val")
     model_file = osp.join(osp.dirname(osp.realpath(__file__)), "..", "..", "models", "best_model.pt")
 
-    train_dataset = HHHGraph(root=train_root, entry_start=0, entry_stop=10_000)
-    val_dataset = HHHGraph(root=val_root, entry_start=10_000, entry_stop=20_000)
+    train_dataset = HHHGraph(root=train_root, entry_start=0, entry_stop=1_000)
+    val_dataset = HHHGraph(root=val_root, entry_start=1_000, entry_stop=2_000)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_data = train_dataset.data.to(device)
@@ -66,18 +64,14 @@ def main():
     stale_epochs = 0
     patience = 100
 
-    focal_loss = FocalLoss()
+    focal_loss = FocalLoss(alpha=torch.tensor([0.01, 0.99]))
 
     for epoch in range(1, 101):
         loss = train(model, train_data, optimizer, loss_fcn=focal_loss)
-        train_acc, train_acc_double_match = test(model, train_data)
-        val_acc, val_acc_double_match = test(model, val_data)
+        train_acc = test(model, train_data)
+        val_acc = test(model, val_data)
 
-        logging.info(
-            f"Epoch: {epoch:03d}, Train Loss: {loss:.4f}, Train Acc: {train_acc:.4f}, "
-            + f"Train Acc (Double Match): {train_acc_double_match:.4f}, "
-            + f"Val Acc: {val_acc:.4f}, Val Acc (Double Match): {val_acc_double_match:.4f}"
-        )
+        logging.info(f"Epoch: {epoch:03d}, Train Loss: {loss:.4f}, Train Acc: {train_acc:.4f}, " + f"Val Acc: {val_acc:.4f}")
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc

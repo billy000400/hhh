@@ -13,38 +13,12 @@ vector.register_awkward()
 
 logging.basicConfig(level=logging.INFO)
 
-UNIQUE = np.array([i + 10 * j for j in range(4) for i in range(4)], dtype=int)
-MAPPING = np.zeros((np.max(UNIQUE) + 1,), dtype=int)
-# this maps them to 16 different cases
-# MAPPING[UNIQUE] = np.arange(0, UNIQUE.size)
-# but instead, we want to treat both jets symmetrically (only 9 different cases)
-# no Higgs matches
-MAPPING[0] = 0
-# single Higgs-jet matches
-MAPPING[1] = 1
-MAPPING[10] = 1
-MAPPING[2] = 2
-MAPPING[20] = 2
-MAPPING[3] = 3
-MAPPING[30] = 3
-# double Higgs-jet matches (different Higgses)
-MAPPING[12] = 4
-MAPPING[21] = 4
-MAPPING[13] = 5
-MAPPING[31] = 5
-MAPPING[23] = 6
-MAPPING[32] = 6
-# double Higgs-jet matches (same Higgs)
-MAPPING[11] = 7
-MAPPING[22] = 8
-MAPPING[33] = 9
-
 N_JETS = 10
 MIN_JET_PT = 20
 MIN_JETS = 6
 N_HIGGS = 3
 FEATURE_BRANCHES = ["jet{i}Pt", "jet{i}Eta", "jet{i}Phi", "jet{i}DeepFlavB", "jet{i}JetId"]
-LABEL_BRANCHES = ["jet{i}HiggsMatchedIndex"]
+LABEL_BRANCHES = ["jet{i}HiggsMatchedIndex", "jet{i}HadronFlavour"]
 ALL_BRANCHES = [branch.format(i=i) for i in range(1, N_JETS + 1) for branch in FEATURE_BRANCHES + LABEL_BRANCHES]
 
 
@@ -94,12 +68,7 @@ def compute_edge_features(pt, eta, phi, higgs_idx, higgs_pt, higgs_eta, higgs_ph
     phi_jj = (jet_pairs["j0"] + jet_pairs["j1"]).phi
 
     # edge targets
-    edge_match = ak.where(jet_pairs["j0"].higgs_idx > -1, jet_pairs["j0"].higgs_idx, 0) + 10 * ak.where(
-        jet_pairs["j1"].higgs_idx > -1, jet_pairs["j1"].higgs_idx, 0
-    )
-    counts = ak.num(edge_match)
-    edge_match = ak.unflatten(MAPPING[ak.flatten(edge_match)], counts)
-
+    edge_match = ak.where(jet_pairs["j0"].higgs_idx > 0, jet_pairs["j0"].higgs_idx == jet_pairs["j1"].higgs_idx, 0)
     return log_delta_r, log_mass2, log_kt, log_z, log_pt_jj, eta_jj, phi_jj, edge_match
 
 
@@ -145,6 +114,7 @@ class HHHGraph(InMemoryDataset):
             btag = get_n_features("jet{i}DeepFlavB", events, N_JETS)
             jet_id = get_n_features("jet{i}JetId", events, N_JETS)
             higgs_idx = get_n_features("jet{i}HiggsMatchedIndex", events, N_JETS)
+            hadron_flavor = get_n_features("jet{i}HadronFlavour", events, N_JETS)
 
             # remove jets below MIN_JET_PT (i.e. zero-padded jets)
             mask = pt > MIN_JET_PT
@@ -154,6 +124,7 @@ class HHHGraph(InMemoryDataset):
             btag = btag[mask]
             jet_id = jet_id[mask]
             higgs_idx = higgs_idx[mask]
+            hadron_flavor = hadron_flavor[mask]
 
             # keep events with MIN_JETS jets
             mask = ak.num(pt) >= MIN_JETS
@@ -163,6 +134,12 @@ class HHHGraph(InMemoryDataset):
             btag = btag[mask]
             jet_id = jet_id[mask]
             higgs_idx = higgs_idx[mask]
+            hadron_flavor = hadron_flavor[mask]
+
+            # switch -1 -> 0
+            higgs_idx = ak.where(higgs_idx > -1, higgs_idx, 0)
+            # require hadron_flavor == 5 (i.e. b-jet ghost association matching)
+            higgs_idx = ak.where(hadron_flavor == 5, higgs_idx, 0)
 
             edge_indices = get_edge_index(ak.zeros_like(pt))
             log_delta_r, log_mass2, log_kt, log_z, log_pt_jj, eta_jj, phi_jj, edge_match = compute_edge_features(
